@@ -5,22 +5,33 @@ var metadata;
 var doneMetadata = false;
 
 function HTTPGET(url) {
-	var req = new XMLHttpRequest();
-	req.open('GET', url, true);
-	req.onload = function(e) {
-		if (req.readyState == 4 && req.status == 200) {
-			if(req.status == 200) {
-				parseAndSendMenu(req.responseText);
-			} else {
-				console.log('Error: ' + req.statusText);
-				nextMenu = ['No Internet'];
-				doneMetadata = false;
-				metadata = {"MSGTYPE_KEY" : 0, "MESSAGE_KEY" : "...", "SIZE_KEY" : nextMenu.length};
-				Pebble.sendAppMessage(metadata, handlePebbleACKMetadata, handlePebbleNACKMetadata);
+	//check for phone connection
+	if (navigator.onLine) {
+		var req = new XMLHttpRequest();
+		req.open('GET', url, true);
+		req.onload = function(e) {
+			if (req.readyState == 4 && req.status == 200) {
+				if(req.status == 200) {
+					parseAndSendMenu(req.responseText);
+				} else {
+					console.log('Error: ' + req.statusText);
+					nextMenu = [req.statusText];
+					doneMetadata = false;
+					metadata = {"MSGTYPE_KEY" : 0, "MESSAGE_KEY" : "...", "SIZE_KEY" : nextMenu.length};
+					Pebble.sendAppMessage(metadata, handlePebbleACKMetadata, handlePebbleNACKMetadata);
+
+
+				}
 			}
-		}
-	};
-	req.send(null);
+		};
+		req.send(null);
+	} else {
+		console.log('Navigator is not online!');
+		nextMenu = ['No Internet'];
+		doneMetadata = false;
+		metadata = {"MSGTYPE_KEY" : 0, "MESSAGE_KEY" : "...", "SIZE_KEY" : nextMenu.length};
+		Pebble.sendAppMessage(metadata, handlePebbleACKMetadata, handlePebbleNACKMetadata);
+	}
 }
 
 function getMenu() {
@@ -81,7 +92,7 @@ function sendMenuItem(i) {
 }
 
 Pebble.addEventListener("ready", function(e) {
-    getMenu();
+    //getMenu();
 });
 
 Pebble.addEventListener("appmessage", function(e) {

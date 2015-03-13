@@ -24,7 +24,7 @@
     "shortName": "Next Meal",
     "uuid": "7ed5475d-8d67-4806-83f0-74b63f0a8b45",
     "versionCode": 1,
-    "versionLabel": "1.0",
+    "versionLabel": "1.1",
     "watchapp": {
         "watchface": false
     }

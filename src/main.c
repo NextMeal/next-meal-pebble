@@ -46,9 +46,9 @@ static void in_received_handler(DictionaryIterator *iter, void *context) {
 			 	APP_LOG(APP_LOG_LEVEL_DEBUG, "Received Type 0 with size: %d", menuSize);
                 free(mealTitle);
                 APP_LOG(APP_LOG_LEVEL_DEBUG, "Received Type 0 with text %s", dict_find(iter, MESSAGE_KEY)->value->cstring);
-                mealTitle = calloc(10, sizeof(char));
-				//memcpy(mealTitle,dict_find(iter, MESSAGE_KEY)->value->cstring,sizeof(dict_find(iter, MESSAGE_KEY)->value->cstring));
-                snprintf(mealTitle, 10, "%s", dict_find(iter, MESSAGE_KEY)->value->cstring);
+                char* bufferTitle = dict_find(iter, MESSAGE_KEY)->value->cstring;
+                mealTitle = calloc(strlen(bufferTitle), sizeof(char));
+                snprintf(mealTitle, strlen(bufferTitle) + 1, "%s", dict_find(iter, MESSAGE_KEY)->value->cstring);
                 counter++;
 				//APP_LOG(APP_LOG_LEVEL_DEBUG, "Type 0 with name: %s", mealTitle);
                 if (food_item_array != NULL) { //get rid of the size 1 menu that said loading
@@ -56,16 +56,18 @@ static void in_received_handler(DictionaryIterator *iter, void *context) {
                     counter = 0;
                 }
 				food_item_array = calloc(menuSize, sizeof(FoodItem));
+                light_enable_interaction();
 				break;
 
 			case 1: //food item
 				tmp = dict_find(iter, SIZE_KEY);
-				int foodItemSize = tmp->value->uint32;
+                char *name = dict_find(iter, MESSAGE_KEY)->value->cstring;
+				int foodItemSize = strlen(name);
 				//APP_LOG(APP_LOG_LEVEL_DEBUG, "Received Type 1 with size: %d", foodItemSize);
                 if (food_item_array[counter].name != NULL)
                     free(food_item_array[counter].name);
 				food_item_array[counter].name = calloc(foodItemSize, sizeof(char));
-				char *name = dict_find(iter, MESSAGE_KEY)->value->cstring;
+
 
                 bool duplicate = false;
 
@@ -96,6 +98,7 @@ static void in_received_handler(DictionaryIterator *iter, void *context) {
                 strftime(lastUpdated, sizeof("Updated @ 00:00"), "Updated @ %H:%M", localtime(&currentTime));
 
                 readyToUpdate = true;
+                light_enable_interaction();
                 break;
 
 			default:
@@ -232,7 +235,7 @@ void select_click_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *c
     if (cell_index->section == 0) {
 
     } else {
-        if (strcmp(food_item_array[cell_index->row].name, "Retrieving...") == 0) {
+        if (strcmp(food_item_array[cell_index->row].name, "N/A          ") == 0) {
 
         } else {
             selectedFoodIndex = cell_index->row;
@@ -246,27 +249,28 @@ void select_click_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *c
     }
 }
 
-void send_int(uint8_t key, uint8_t cmd)
-{
-    DictionaryIterator *iter;
-    app_message_outbox_begin(&iter);
-
-    Tuplet value = TupletInteger(key, cmd);
-    dict_write_tuplet(iter, &value);
-
+void request_menu() {
     app_message_outbox_send();
+    snprintf(lastUpdated, 15, "%s","Updating...    ");
+    //APP_LOG(APP_LOG_LEVEL_DEBUG, "request update");
+    readyToUpdate = false;
+    menu_layer_reload_data(menu_layer);
 }
 
 void tick_callback(struct tm *tick_time, TimeUnits units_changed)
 {
     //called every minute
     if (readyToUpdate == true) {
-        //Send an arbitrary message, the response will be handled by in_received_handler()
-        send_int(5, 5);
-        snprintf(lastUpdated, 15, "%s","Updating...    ");
-        //APP_LOG(APP_LOG_LEVEL_DEBUG, "request update");
-        readyToUpdate = false;
-        menu_layer_reload_data(menu_layer);
+        request_menu();
+    }
+}
+
+void bluetooth_handler(bool connected) {
+    if (connected) { //on reconnect, get new menu
+        request_menu();
+    } else {
+        snprintf(lastUpdated, 15, "%s","Disconnected");
+        readyToUpdate = false; //disable updates
     }
 }
 
@@ -277,12 +281,14 @@ void menu_window_load(Window *window) {
     lastUpdated = calloc(15, sizeof(char));
 	snprintf(lastUpdated, 15, "%s","Updating...    ");
 
+    if (bluetooth_connection_service_peek() == false) {
+        snprintf(lastUpdated, 15, "%s","Disconnected");
+    }
+
     //make menu of one item saying loading text
     food_item_array = calloc(1, sizeof(FoodItem));
     food_item_array[counter].name = calloc(13, sizeof(char));
-    snprintf(food_item_array[0].name, 14, "Retrieving...");
-
-    mealTitle = calloc(9, sizeof(char));
+    snprintf(food_item_array[0].name, 14, "N/A          ");
 
 	menu_layer = menu_layer_create(GRect(0, 0, 144, 168 - 16));
 
@@ -301,12 +307,22 @@ void menu_window_load(Window *window) {
 
 	layer_add_child(window_get_root_layer(window), menu_layer_get_layer(menu_layer));
 
+    bluetooth_connection_service_subscribe(bluetooth_handler);
+
+    app_message_register_inbox_received(in_received_handler);
+	app_message_register_inbox_dropped(in_dropped_handler);
+  	app_message_register_outbox_failed(out_failed_handler);
+	app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
+
+    tick_timer_service_subscribe(MINUTE_UNIT, tick_callback);
 }
 
 void menu_window_unload(Window *window) {
 	menu_layer_destroy(menu_layer);
     free(mealTitle);
     free(lastUpdated);
+
+    bluetooth_connection_service_unsubscribe();
 }
 
 void init() {
@@ -317,14 +333,7 @@ void init() {
 	});
     //window_set_fullscreen(window, true);
 
-	app_message_register_inbox_received(in_received_handler);
-	app_message_register_inbox_dropped(in_dropped_handler);
-  	app_message_register_outbox_failed(out_failed_handler);
-	app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
-
     window_stack_push(window, true);
-
-    tick_timer_service_subscribe(MINUTE_UNIT, tick_callback);
 }
 
 void deinit() {
